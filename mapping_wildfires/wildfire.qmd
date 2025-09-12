@@ -231,7 +231,7 @@ animate(
 unzip("data/FirespotArea_LANDSAT_USA_contiguous_and_Hawaii_7d.kmz", exdir = "data/fire_kml")
 
 wildfire_area_data <- st_read(
-  "data/fire_kml/LANDSAT_USA_contiguous_and_Hawaii_7d_1757462691416.kml",
+  "data/fire_kml/LANDSAT_USA_contiguous_and_Hawaii_7d_1757637893092.kml",
   layer = "30m Fire Detection Footprints (older than the last 24hrs) "
 )
 
@@ -260,7 +260,35 @@ Download the LANDSAT 30m CSV for USA (Conterminous) and Hawaii at the bottom rig
 -   Map the data with any package you would like, just make sure there is at least a slight difference from the examples above, be as creative as possible while utilizing your critical thinking
 
 ```{r}
+dataframe <- read.csv("data/LANDSAT_USA_contiguous_and_Hawaii_7d.csv")
 
+sf_object <- st_as_sf(dataframe, 
+                      coords = c("longitude", "latitude"),
+                      crs = 4326,
+                      remove = FALSE)
+
+pal <- colorFactor(
+  palette = c("red3", "yellow2", "orange"),
+  domain = sf_object$confidence
+)
+
+# Build the leaflet map
+leaflet(data = sf_object) %>%
+  addTiles() %>%
+  addCircleMarkers(
+    radius = 4,
+    color = ~pal(confidence),
+    stroke = FALSE,
+    fillOpacity = 0.3,
+    popup = ~paste("Date:", acq_date, "<br>",
+                   "Time:", acq_time, "<br>",
+                   "Confidence:", confidence)
+  ) %>%
+  addLegend("bottomright", 
+            pal = pal, 
+            values = ~confidence,
+            title = "Confidence Level",
+            opacity = 1)
 ```
 
 ## ✨ Summary
@@ -282,5 +310,15 @@ Download the LANDSAT 30m CSV for USA (Conterminous) and Hawaii at the bottom rig
 
 ```
 
+## ✨ Extra Code
+
 ```         
+```
+
+```{r}
+library(leaflet) 
+library(dplyr) 
+library(lubridate) 
+# Pick a recent date from your data (or use Sys.Date() - 1) check_date <- wildfire_shp_data$ACQ_DATE |> as.Date() |> max(na.rm = TRUE) # GIBS uses YYYY-MM-DD; choose a layer: # - "MODIS_Terra_CorrectedReflectance_TrueColor" # - "VIIRS_SNPP_CorrectedReflectance_TrueColor" # - "VIIRS_NOAA20_CorrectedReflectance_TrueColor" # Bonus overlay (fire mask): # - "FIRMS_VIIRS_SNPP_NRT" # - "FIRMS_VIIRS_NOAA20_NRT" # - "FIRMS_MODIS_Terra_Aqua"
+leaflet() |> addWMSTiles( baseUrl = "https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi", layers = "MODIS_Terra_CorrectedReflectance_TrueColor", options = WMSTileOptions(format = "image/png", transparent = FALSE, time = as.character(check_date)), attribution = "NASA GIBS" ) |> addWMSTiles( baseUrl = "https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi", layers = "FIRMS_VIIRS_SNPP_NRT", options = WMSTileOptions(format = "image/png", transparent = TRUE, time = as.character(check_date)), attribution = "NASA GIBS (FIRMS)" ) |> addCircles( data = wildfire_shp_data, lng = ~LONGITUDE, lat = ~LATITUDE, radius = 1000, weight = 1, color = "#ff9900", fillOpacity = 0.5, popup = ~paste0("Date: ", ACQ_DATE, "<br>Conf: ", CONFIDENCE) )
 ```
