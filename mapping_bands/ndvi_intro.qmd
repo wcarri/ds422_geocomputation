@@ -1,0 +1,89 @@
+---
+title: "🌿 NDVI over Oʻahu with Sentinel-2 (R Tutorial)"
+subtitle: "From Copernicus Browser to NDVI map in minutes"
+author: "Your Name"
+format:
+  html:
+    theme: cosmo
+    toc: true
+    toc-title: "On this page"
+    toc-depth: 3
+execute:
+  echo: true
+  message: false
+  warning: false
+editor: visual
+---
+
+```{r}
+library(here)
+library(terra)
+library(sf)
+```
+
+## NDVI (Normalized Difference Vegetation Index)
+
+NDVI is a simple, per-pixel indicator of “greenness” (photosynthetic activity).
+
+### What it measures
+
+Plants reflect more **near-infrared (NIR)** light and absorb **red** light. NDVI combines those two bands to highlight living vegetation.
+
+### Formula
+
+$$
+\mathrm{NDVI} \;=\; \frac{\text{NIR} - \text{Red}}{\text{NIR} + \text{Red}}
+$$
+
+```{=html}
+<!-- Plain-text fallback (if math is disabled):
+NDVI = (NIR - Red) / (NIR + Red)
+-->
+```
+
+### Typical value ranges
+
+-   **0.6–0.9**: dense, healthy vegetation\
+-   **0.2–0.5**: sparse/brown vegetation, shrubs/grass\
+-   **0–0.2**: bare soil / urban\
+-   **\< 0**: water, clouds, shadows, snow
+
+### What data do we need to calculate NDVI
+
+-   We can use the [Copernicus Open Access Hub](https://browser.dataspace.copernicus.eu/) to grab data form the satellite Sentinel 2
+
+-   We specifically need Band 8 data for near-infared and Band 4 data for red
+
+```{r}
+# Paths to your .jp2 files
+red_path <- here("data/T04QFJ_20250906T210919_B04_10m.jp2")
+nir_path <- here("data/T04QFJ_20250906T210919_B08_10m.jp2")
+```
+
+### These .jp2 files contain raster data
+
+-   Raster data is a way to represent geography as a **grid of cells (pixels)**. Each cell has a single value (e.g., elevation, temperature, NDVI) and the whole grid is georeferenced so every cell aligns to a real-world location
+
+-   The `terra` package helps us read raster data into R
+
+```{r}
+# Read bands directly
+red <- rast(red_path)
+nir <- rast(nir_path)
+```
+
+### Calculating NDVI
+
+$$
+\mathrm{NDVI} \;=\; \frac{\text{NIR} - \text{Red}}{\text{NIR} + \text{Red}}
+$$
+
+```{r}
+ndvi <- (nir - red) / (nir + red)
+```
+
+### Plotting NDVI
+
+```{r}
+plot(ndvi, main = "NDVI")
+```
