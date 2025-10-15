@@ -1,0 +1,425 @@
+---
+title: "Exploring County Health with SHAP Values"
+subtitle: "Understanding What Drives Poor Health Outcomes Across U.S. Counties"
+author: "DS 400: Bayesian Statistics"
+date: today
+format:
+  html:
+    theme: cosmo
+    toc: true
+    toc-depth: 3
+    code-fold: false
+    code-tools: true
+    df-print: paged
+    fig-width: 10
+    fig-height: 7
+    embed-resources: true
+    smooth-scroll: true
+execute:
+  warning: false
+  message: false
+  cache: true
+---
+
+```{r}
+#| label: setup
+#| include: false
+knitr::opts_chunk$set(
+  fig.align = "center",
+  out.width = "100%"
+)
+```
+
+## 🏥 Introduction: What Makes Communities Healthy?
+
+What factors contribute most to poor health outcomes in U.S. counties? Is it education? Income? Access to healthcare? Environmental quality?
+
+In this analysis, we'll use **County Health Rankings** data combined with **Random Forests** and **SHAP (SHapley Additive exPlanations)** values to uncover the key drivers of health outcomes across America.
+
+::: {.callout-note icon="🎯"}
+## Analysis Goals
+
+-   Build a predictive model for poor health outcomes
+-   Identify the most important features driving predictions
+-   Understand how individual features affect health outcomes
+-   Explore specific county predictions with SHAP values
+:::
+
+------------------------------------------------------------------------
+
+## 📦 Load Required Packages
+
+```{r}
+#| label: load-packages
+#| code-fold: false
+
+library(tidyverse)
+library(here)
+library(readxl)
+library(janitor)
+library(naniar)
+library(randomForest)
+library(treeshap)
+```
+
+::: callout-tip
+## What are SHAP Values?
+
+SHAP (SHapley Additive exPlanations) values explain the output of machine learning models by assigning each feature an importance value for a particular prediction. They're based on game theory and provide consistent, interpretable explanations!
+:::
+
+------------------------------------------------------------------------
+
+## 📊 Load and Prepare the Data
+
+### Import County Health Rankings Data
+
+```{r}
+#| label: load-data
+#| code-fold: false
+
+chr_data <- read_excel(here("mapping_machine/data", "2025_County_Health_Rankings_Data.xlsx"), sheet = 2, skip = 1)
+chr_data <- chr_data %>%
+  clean_names()
+```
+
+::: {.callout-tip icon="💡"}
+## Challenge Problem #1
+
+Create a map showing `percent_fair_or_poor_health` by county. You'll need to:
+
+-   Use an AI assistant
+    -   run glimpse(chr_data) in the console
+    -   copy and paste the output into an AI
+    -   prompt it to write simple and effective R code to make a choropleth map of `percent_fair_or_poor_health`by county
+
+Give it a try!
+:::
+
+```{r}
+# Load required libraries
+library(tidyverse)
+library(tigris)
+library(sf)
+
+# Use simple features (sf)
+options(tigris_use_cache = TRUE)
+options(tigris_class = "sf")
+
+# Load county shapefiles (U.S. counties)
+counties_sf <- counties(cb = TRUE, year = 2023)
+
+# Prepare your data (make sure FIPS are 5-digit character codes)
+chr_data <- chr_data %>%
+  mutate(fips = str_pad(fips, width = 5, side = "left", pad = "0"))
+
+# Join county geometries with your health data
+map_data <- counties_sf %>%
+  left_join(chr_data, by = c("GEOID" = "fips"))
+
+# Plot choropleth map
+ggplot(map_data) +
+  geom_sf(aes(fill = percent_fair_or_poor_health), color = NA) +
+  scale_fill_viridis_c(
+    option = "plasma",
+    na.value = "grey80",
+    name = "% Fair or Poor Health"
+  ) +
+  labs(
+    title = "Percent of Adults Reporting Fair or Poor Health by County",
+    subtitle = "Source: County Health Rankings",
+    caption = "Counties with missing data shown in grey"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(size = 16, face = "bold"),
+    plot.subtitle = element_text(size = 12)
+  )
+
+#Prompt engineered by ChatGPT
+```
+
+------------------------------------------------------------------------
+
+### Select Key Health Determinants
+
+We're focusing on social, economic, and environmental factors that might influence health outcomes:
+
+```{r}
+#| label: select-variables
+#| code-fold: false
+
+chr_data <- chr_data %>%
+  select(food_environment_index,
+         percent_uninsured,
+         percent_severe_housing_problems,
+         percent_households_with_broadband_access,
+         average_daily_pm2_5,
+         percent_unemployed,
+         income_ratio,
+         percent_children_in_poverty,
+         social_association_rate,
+         preventable_hospitalization_rate,
+         percent_completed_high_school,
+         percent_some_college,
+         percent_fair_or_poor_health)
+```
+
+::: {.callout-note collapse="true"}
+## 📋 Variable Definitions
+
+-   **Food Environment Index**: Measures access to healthy foods
+-   **Percent Uninsured**: Population without health insurance
+-   **Percent Severe Housing Problems**: Housing quality and affordability issues
+-   **Broadband Access**: Households with internet access
+-   **PM2.5**: Air pollution (particulate matter)
+-   **Income Ratio**: Ratio of household income at 80th to 20th percentile
+-   **Social Association Rate**: Membership in civic organizations
+-   **Preventable Hospitalization Rate**: Hospital visits that could have been prevented
+-   **Education Variables**: High school and college completion rates
+-   **Percent Fair or Poor Health**: Our outcome variable (self-reported health status)
+:::
+
+------------------------------------------------------------------------
+
+## 🔍 Exploratory Data Analysis
+
+### Distribution of Our Outcome Variable
+
+```{r, warning=FALSE, message=FALSE}
+#| label: outcome-distribution
+#| fig-cap: "Distribution of self-reported poor health across U.S. counties"
+
+ggplot(chr_data, aes(x = percent_fair_or_poor_health)) +
+  geom_histogram()
+```
+
+## 🕵️ Missing Data Investigation
+
+Before building our model, let's check for missing values:
+
+```{r}
+#| label: missing-data
+#| fig-cap: "Missing data patterns in our health dataset"
+
+naniar::gg_miss_var(chr_data, show_pct = TRUE)
+```
+
+### Handle Missing Data
+
+```{r}
+#| label: drop-na
+#| code-fold: false
+
+chr_data <- chr_data %>%
+  drop_na()
+```
+
+::: callout-warning
+## Data Cleaning Note
+
+We're using complete case analysis here (dropping rows with any missing values). In practice, you might want to explore more sophisticated imputation methods, especially if missingness is substantial or not random.
+:::
+
+------------------------------------------------------------------------
+
+## 🌲 Build the Random Forest Model
+
+Let's train a Random Forest to predict the percentage of people reporting fair or poor health:
+
+```{r}
+#| label: random-forest
+#| code-fold: false
+
+rf = randomForest(percent_fair_or_poor_health ~ ., data = chr_data, ntree = 500)
+rf
+```
+
+::: {.callout-note icon="📈"}
+## Model Performance
+
+Look at the `% Var explained` metric. This tells us how much of the variance in health outcomes our model can explain using these social, economic, and environmental factors. Also look a the `Mean of squared residuals -`The average of the squared differences between the actual health outcomes and the model's predictions. Lower values indicate better predictive accuracy.
+:::
+
+------------------------------------------------------------------------
+
+## 🔬 SHAP Analysis: Understanding Feature Importance
+
+### Prepare for SHAP Calculation
+
+```{r}
+#| label: unify-model
+#| code-fold: false
+
+unified <- unify(rf, chr_data)
+treeshap1 <- treeshap(unified,  chr_data[1:200, ], verbose = 0)
+```
+
+------------------------------------------------------------------------
+
+## 📊 Feature Importance
+
+Which factors matter most for predicting poor health outcomes?
+
+```{r}
+#| label: feature-importance
+#| fig-cap: "Top 6 most important features for predicting poor health outcomes"
+#| fig-height: 6
+
+plot_feature_importance(treeshap1, max_vars = 6)
+```
+
+::: {.callout-important icon="🎯"}
+## Key Insight
+
+The features at the top have the biggest impact on predictions across all counties. These are the "leverage points" where interventions might have the greatest effect on community health!
+:::
+
+------------------------------------------------------------------------
+
+## 📈 Feature Dependence: Deep Dive
+
+### Education's Impact on Health
+
+How does high school completion affect health outcomes?
+
+```{r}
+#| label: education-dependence
+#| fig-cap: "Relationship between high school completion and SHAP values for health outcomes"
+
+plot_feature_dependence(treeshap1, "percent_completed_high_school")
+```
+
+::: {.callout-note icon="💭"}
+## Interpreting This Plot
+
+-   **X-axis**: The actual values of the feature (% high school completion)
+-   **Y-axis**: The SHAP value (how much this feature pushes predictions up or down)
+-   **Pattern**: Look for trends - does higher education consistently lead to better health predictions?
+:::
+
+------------------------------------------------------------------------
+
+::: {.callout-tip icon="🚀"}
+## Challenge Problem #2
+
+Create feature dependence plots for the next 4 most important variables from the feature importance plot above.
+
+**Hint**: Use the same `plot_feature_dependence()` function but change the variable name.
+
+``` r
+# Template:
+# plot_feature_dependence(treeshap1, "your_variable_name_here")
+```
+
+What patterns do you notice? Are the relationships linear or non-linear?
+:::
+
+```{r}
+plot_feature_dependence(treeshap1, "percent_children_in_poverty")
+```
+
+```{r}
+plot_feature_dependence(treeshap1, "food_environment_index")
+```
+
+```{r}
+plot_feature_dependence(treeshap1, "percent_some_college")
+```
+
+```{r}
+plot_feature_dependence(treeshap1, "percent_households_with_broadband_access")
+```
+
+------------------------------------------------------------------------
+
+## 🎯 Individual County Analysis
+
+Let's examine what drives the prediction for a specific county:
+
+```{r}
+#| label: individual-contribution
+#| fig-cap: "SHAP contribution plot for observation 2: How each feature affects this county's prediction"
+
+plot_contribution(treeshap1, obs = 2)
+```
+
+::: {.callout-note icon="🔍"}
+## Reading the Contribution Plot
+
+-   **Red bars**: Features pushing the prediction toward *worse* health outcomes
+-   **Blue bars**: Features pushing the prediction toward *better* health outcomes\
+-   **Length**: How strong the effect is
+
+This shows you exactly which factors make this particular county's health outcomes better or worse than the baseline!
+:::
+
+------------------------------------------------------------------------
+
+## 🎓 Reflection Questions
+
+::: {.callout-warning icon="🤔"}
+## Think About It
+
+1.  **Policy Implications**: Based on the feature importance, which 2-3 areas should local governments prioritize for improving community health?
+
+2.  **Causality vs Correlation**: Does this analysis prove that these features *cause* poor health outcomes? Why or why not?
+
+3.  **Equity Considerations**: Do you notice any patterns that might indicate health disparities related to socioeconomic factors?
+
+4.  **Model Limitations**: What important factors might be missing from this analysis? What would you add if you could?
+
+5.  **Intervention Planning**: If you were a county health director, how would you use these SHAP values to design interventions?
+:::
+
+------------------------------------------------------------------------
+
+## 💡 Key Takeaways
+
+::: {.callout-tip icon="✨"}
+## What We Learned
+
+1.  **Random Forests** can effectively model complex health outcomes using multiple predictors
+2.  **SHAP values** provide interpretable insights into both:
+    -   Global feature importance (what matters overall)
+    -   Local explanations (what matters for specific counties)
+3.  **Health is multifaceted** - education, economics, environment, and social factors all play important roles
+4.  **Machine learning + interpretability** tools like SHAP help us move from black-box predictions to actionable insights
+:::
+
+------------------------------------------------------------------------
+
+## 📚 Additional Resources
+
+-   [SHAP Documentation](https://shap.readthedocs.io/)
+-   [County Health Rankings Methodology](https://www.countyhealthrankings.org/)
+-   [treeshap R Package](https://github.com/ModelOriented/treeshap)
+-   Random Forests in R: Breiman & Cutler's [Random Forest Page](https://www.stat.berkeley.edu/~breiman/RandomForests/)
+
+------------------------------------------------------------------------
+
+## 🔬 Your Turn: Extend the Analysis
+
+::: {.callout-tip icon="🎯"}
+## Extension Ideas
+
+1.  **Try different sample sizes** for SHAP calculation (we used 200 counties)
+2.  **Compare multiple observations** - pick 3-5 diverse counties and compare their contribution plots
+3.  **Experiment with model parameters** - try different `ntree` values in the Random Forest
+4.  **Temporal analysis** - if you have data from multiple years, track how feature importance changes over time
+5.  **Subgroup analysis** - split by region or urbanicity and build separate models
+:::
+
+------------------------------------------------------------------------
+
+*This analysis demonstrates the power of combining machine learning with interpretable AI techniques to understand complex public health outcomes. The insights generated can inform evidence-based policy decisions and targeted interventions!*
+
+```{r}
+#| label: session-info
+#| echo: false
+#| eval: false
+
+# Uncomment to see package versions used
+# sessionInfo()
+```
