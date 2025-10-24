@@ -4,17 +4,10 @@ subtitle: "Understanding What Drives Poor Health Outcomes Across U.S. Counties"
 author: "DS 400: Bayesian Statistics"
 date: today
 format:
-  html:
-    theme: cosmo
+  pdf:
     toc: true
-    toc-depth: 3
-    code-fold: false
-    code-tools: true
-    df-print: paged
-    fig-width: 10
-    fig-height: 7
-    embed-resources: true
-    smooth-scroll: true
+    number-sections: true
+    geometry: margin=1in
 execute:
   warning: false
   message: false
@@ -414,6 +407,90 @@ This shows you exactly which factors make this particular county's health outcom
 ------------------------------------------------------------------------
 
 *This analysis demonstrates the power of combining machine learning with interpretable AI techniques to understand complex public health outcomes. The insights generated can inform evidence-based policy decisions and targeted interventions!*
+
+## 🔬 Option: "Experiment with model parameters"
+
+::: {.callout-tip icon="🎯"}
+## What was done
+
+1.  **Purpose:** Testing how model size affects feature importance.
+2.  **Questions:**
+    -   Do the top features stay the same? Does SHAP importance stabilize as trees increase?
+:::
+
+```{r}
+#| label: rf-compare-ntree
+#| message: false
+#| warning: false
+
+library(randomForest)
+library(treeshap)
+library(iml)
+library(dplyr)
+library(ggplot2)
+```
+
+```{r}
+
+X <- chr_data %>% select(-percent_fair_or_poor_health)
+y <- chr_data$percent_fair_or_poor_health
+
+ntrees <- c(100, 500, 1000)
+
+results <- list()
+
+for (n in ntrees) {
+  cat("Fitting Random Forest with", n, "trees...\n")
+  
+  rf_model <- randomForest(percent_fair_or_poor_health ~ ., data = chr_data, ntree = n)
+  
+  unified_model <- unify(rf_model, chr_data)
+  treeshap_values <- treeshap(unified_model, chr_data[1:200, ], verbose = 0)
+  
+  # Store model and SHAP results
+  results[[as.character(n)]] <- list(
+    model = rf_model,
+    shap = treeshap_values
+  )
+}
+```
+
+```{r}
+imp_df <- purrr::map_df(names(results), function(n) {
+  data.frame(
+    variable = rownames(results[[n]]$model$importance),
+    importance = results[[n]]$model$importance[, 1],
+    ntree = as.numeric(n)
+  )
+})
+```
+
+```{r}
+ggplot(imp_df, aes(x = reorder(variable, importance), y = importance, fill = factor(ntree))) +
+  geom_col(position = "dodge") +
+  coord_flip() +
+  labs(
+    title = "Feature Importance by Random Forest Size",
+    x = "Variable",
+    y = "Importance",
+    fill = "N Trees"
+  ) +
+  theme_minimal()
+```
+
+::: {.callout-tip icon="🎯"}
+## What was done
+
+1.  **Purpose:** Testing how model size affects feature importance.
+2.  **Questions:**
+    -   Do the top features stay the same? Do SHAP importance stabilize as trees increase?
+
+        For this assignment I tested different model sizes on the random forest model. This was done by changing the number of 'trees' that the random forest had. The general consensus is that the more trees there are, the more efficient the model gets. But of course, the model can encounter an over fitting problem.
+
+        All in all, from my observations it seems that top features stay the same. Percent completed high school, children in poverty, college, and food environment index seem to be the most important variables when it comes to feature importance for all three variations of the random forest model.
+
+        SHAP values seem stable within the least important feature variables. When it comes to the top 4, SHAP values seem slighlty less stable. I say this because there is a slight outliar in the percent_some_college feature. This feature affected the random forest model with 100 ntrees by a significant degree. From this analysis alone, I can't pinpoint exactly this was the case. Overall, I found that this analysis was really helpful in validating which features were the most important in the random forest model, and by how much.
+:::
 
 ```{r}
 #| label: session-info
